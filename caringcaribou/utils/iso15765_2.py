@@ -34,13 +34,15 @@ class IsoTp:
     MAX_FRAME_LENGTH = 8
     MAX_MESSAGE_LENGTH = 4095
 
-    def __init__(self, arb_id_request, arb_id_response, bus=None, padding_value=0x00):
+    def __init__(self, arb_id_request, arb_id_response, bus=None, padding_value=0x00, is_fd=False, bitrate_switch=False):
         # Setting default bus to None rather than the actual bus prevents a CanError when
         # called with a virtual CAN bus, while the OS is lacking a working CAN interface
         if bus is None:
-            self.bus = can.Bus(DEFAULT_INTERFACE)
+            self.bus = can.Bus(DEFAULT_INTERFACE, fd=is_fd)
         else:
             self.bus = bus
+        self.is_fd = is_fd
+        self.bitrate_switch = bitrate_switch
         self.arb_id_request = arb_id_request
         self.arb_id_response = arb_id_response
         # Controls optional padding of SF messages and the last CF frame in multi-frame messages
@@ -90,7 +92,7 @@ class IsoTp:
         :return: None
         """
         is_extended = force_extended or arbitration_id > ARBITRATION_ID_MAX
-        msg = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=is_extended)
+        msg = can.Message(arbitration_id=arbitration_id, data=data, is_extended_id=is_extended, is_fd=self.is_fd, bitrate_switch=self.bitrate_switch)
         self.bus.send(msg)
 
     def decode_sf(self, frame):

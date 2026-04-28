@@ -155,7 +155,7 @@ def process_negative_response(response: list[int]) -> None:
 
 
 def uds_discovery(min_id, max_id, blacklist_args, auto_blacklist_duration,
-                  delay, verify, print_results=True):
+                  delay, verify, print_results=True, is_fd=False, bitrate_switch=False):
     """
     Scans for diagnostics support by brute forcing session control
     messages to different arbitration IDs.
@@ -215,7 +215,7 @@ def uds_discovery(min_id, max_id, blacklist_args, auto_blacklist_duration,
 
     found_arbitration_ids = []
 
-    with IsoTp(None, None) as tp:
+    with IsoTp(None, None, is_fd=is_fd, bitrate_switch=bitrate_switch) as tp:
         blacklist = set(blacklist_args)
         # Perform automatic blacklist scan
         if auto_blacklist_duration > 0:
@@ -335,9 +335,17 @@ def __uds_discovery_wrapper(args):
     print_results = True
 
     try:
-        arb_id_pairs = uds_discovery(min_id, max_id, blacklist,
-                                     auto_blacklist_duration,
-                                     delay, verify, print_results)
+        arb_id_pairs = uds_discovery(
+            min_id,
+            max_id,
+            blacklist,
+            auto_blacklist_duration,
+            delay,
+            verify,
+            print_results,
+            is_fd=args.can_fd,
+            bitrate_switch=args.bitrate_switch
+        )
         if len(arb_id_pairs) == 0:
             # No UDS discovered
             print("\nDiagnostics service could not be found.")
@@ -357,7 +365,7 @@ def __uds_discovery_wrapper(args):
 
 
 def service_discovery(arb_id_request, arb_id_response, timeout,
-                      min_id=BYTE_MIN, max_id=BYTE_MAX, print_results=True):
+                      min_id=BYTE_MIN, max_id=BYTE_MAX, print_results=True, is_fd=False, bitrate_switch=False):
     """
     Scans for supported UDS services on the specified arbitration ID.
     Returns a list of found service IDs.
@@ -374,13 +382,17 @@ def service_discovery(arb_id_request, arb_id_response, timeout,
     :type min_id: int
     :type max_id: int
     :type print_results: bool
+    :type is_fd: bool
+    :type bitrate_switch: bool
     :return: list of supported service IDs
     :rtype [int]
     """
     found_services = []
 
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd,
+               bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
         # Send requests
@@ -423,8 +435,13 @@ def __service_discovery_wrapper(args):
     arb_id_response = args.dst
     timeout = args.timeout
     # Probe services
-    found_services = service_discovery(arb_id_request,
-                                       arb_id_response, timeout)
+    found_services = service_discovery(
+        arb_id_request,
+        arb_id_response,
+        timeout,
+        is_fd=args.can_fd,
+        bitrate_switch=args.bitrate_switch
+    )
     # Print results
     for service_id in found_services:
         service_name = UDS_SERVICE_NAMES.get(service_id, "Unknown service")
@@ -432,7 +449,7 @@ def __service_discovery_wrapper(args):
               .format(service_id, service_name))
 
 
-def sub_discovery(arb_id_request, arb_id_response, diagnostic, service, timeout, print_results=True):
+def sub_discovery(arb_id_request, arb_id_response, diagnostic, service, timeout, print_results=True, is_fd=False, bitrate_switch=False):
     """
     Scans for supported UDS Diagnostic Session Control subservices on the specified arbitration ID.
     Returns a list of found Diagnostic Session Control subservice IDs.
@@ -510,8 +527,15 @@ def __sub_discovery_wrapper(args):
     timeout = args.timeout
 
     # Probe subservices
-    found_subservices, subservice_status = sub_discovery(arb_id_request,
-                                                         arb_id_response, diagnostic, service, timeout)
+    found_subservices, subservice_status = sub_discovery(
+        arb_id_request,
+        arb_id_response,
+        diagnostic,
+        service,
+        timeout,
+        is_fd=args.can_fd,
+        bitrate_switch=args.bitrate_switch
+    )
 
     service_name = UDS_SERVICE_NAMES.get(service, "Unknown service")
     # Print results
@@ -525,9 +549,11 @@ def __sub_discovery_wrapper(args):
             print("\n0x{0:02x} : {1}".format(subservice_id, nrc_name), end=" ")
 
 
-def raw_send(arb_id_request, arb_id_response, service, session_type):
+def raw_send(arb_id_request, arb_id_response, service, session_type, is_fd=False, bitrate_switch=False):
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd,
+               bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         request = [0] * 2
         request[0] = service
@@ -541,7 +567,7 @@ def raw_send(arb_id_request, arb_id_response, service, session_type):
 
 
 def tester_present(arb_id_request, delay, duration,
-                   suppress_positive_response):
+                   suppress_positive_response, is_fd=False, bitrate_switch=False):
     """
     Sends TesterPresent messages to 'arb_id_request'. Stops automatically
     after 'duration' seconds or runs forever if this is None.
@@ -577,7 +603,7 @@ def tester_present(arb_id_request, delay, duration,
     print("Sending TesterPresent to arbitration ID {0} (0x{0:02x})"
           .format(arb_id_request))
     print("\nPress Ctrl+C to stop\n")
-    with IsoTp(arb_id_request, None) as can_wrap:
+    with IsoTp(arb_id_request, None, is_fd=is_fd, bitrate_switch=bitrate_switch) as can_wrap:
         counter = 1
         while True:
             can_wrap.send_request(message_data)
@@ -596,11 +622,17 @@ def __tester_present_wrapper(args):
     duration = args.duration
     suppress_positive_response = args.spr
 
-    tester_present(arb_id_request, delay, duration,
-                   suppress_positive_response)
+    tester_present(
+        arb_id_request,
+        delay,
+        duration,
+        suppress_positive_response,
+        is_fd=args.can_fd,
+        bitrate_switch=args.bitrate_switch
+    )
 
 
-def ecu_reset(arb_id_request, arb_id_response, reset_type, timeout):
+def ecu_reset(arb_id_request, arb_id_response, reset_type, timeout, is_fd=False, bitrate_switch=False):
     """
     Sends an ECU Reset message to 'arb_id_request'. Returns the first
     response received from 'arb_id_response' within 'timeout' seconds
@@ -628,7 +660,9 @@ def ecu_reset(arb_id_request, arb_id_response, reset_type, timeout):
                          .format(timeout))
 
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd,
+               bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
         with Iso14229_1(tp) as uds:
@@ -650,8 +684,14 @@ def __ecu_reset_wrapper(args):
     print("Sending ECU reset, type 0x{0:02x} to arbitration ID {1} "
           "(0x{1:02x})".format(reset_type, arb_id_request))
     try:
-        response = ecu_reset(arb_id_request, arb_id_response,
-                             reset_type, timeout)
+        response = ecu_reset(
+            arb_id_request,
+            arb_id_response,
+            reset_type,
+            timeout,
+            is_fd=args.can_fd,
+            bitrate_switch=args.bitrate_switch
+        )
     except ValueError as e:
         print("ValueError: {0}".format(e))
         return
@@ -716,14 +756,17 @@ def __security_seed_wrapper(args):
             # Extended diagnostics
             response = extended_session(arb_id_request,
                                         arb_id_response,
-                                        session_type)
+                                        session_type,
+                                        is_fd=args.can_fd,
+                                        bitrate_switch=args.bitrate_switch)
             if not Iso14229_1.is_positive_response(response):
                 print("Unable to enter extended session. Retrying...\n")
                 continue
 
             # Request seed
             response = request_seed(arb_id_request, arb_id_response,
-                                    level, None, None)
+                                    level, None, None,
+                                    is_fd=args.can_fd, bitrate_switch=args.bitrate_switch)
             if response is None:
                 print("\nInvalid response")
             elif Iso14229_1.is_positive_response(response):
@@ -737,7 +780,7 @@ def __security_seed_wrapper(args):
                 process_negative_response(response)
                 break
             if reset_type:
-                ecu_reset(arb_id_request, arb_id_response, reset_type, None)
+                ecu_reset(arb_id_request, arb_id_response, reset_type, None, is_fd=args.can_fd, bitrate_switch=args.bitrate_switch)
                 time.sleep(reset_delay)
     except KeyboardInterrupt:
         print("Interrupted by user.")
@@ -752,9 +795,10 @@ def __security_seed_wrapper(args):
             print(seed)
 
 
-def extended_session(arb_id_request, arb_id_response, session_type):
+def extended_session(arb_id_request, arb_id_response, session_type, is_fd=False, bitrate_switch=False):
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd, bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
         with Iso14229_1(tp) as uds:
@@ -763,7 +807,7 @@ def extended_session(arb_id_request, arb_id_response, session_type):
 
 
 def request_seed(arb_id_request, arb_id_response, level,
-                 data_record, timeout):
+                 data_record, timeout, is_fd=False, bitrate_switch=False):
     """
     Sends a Request seed message to 'arb_id_request'. Returns the
     first response received from 'arb_id_response' within 'timeout'
@@ -794,7 +838,8 @@ def request_seed(arb_id_request, arb_id_response, level,
                          .format(timeout))
 
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd, bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
         with Iso14229_1(tp) as uds:
@@ -806,7 +851,7 @@ def request_seed(arb_id_request, arb_id_response, level,
             return response
 
 
-def send_key(arb_id_request, arb_id_response, level, key, timeout):
+def send_key(arb_id_request, arb_id_response, level, key, timeout, is_fd=False, bitrate_switch=False):
     """
     Sends a Send key message to 'arb_id_request'.
     Returns the first response received from 'arb_id_response' within
@@ -835,7 +880,9 @@ def send_key(arb_id_request, arb_id_response, level, key, timeout):
                          .format(timeout))
 
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd,
+               bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
         with Iso14229_1(tp) as uds:
@@ -855,8 +902,16 @@ def __dump_dids_wrapper(args):
     min_did = args.min_did
     max_did = args.max_did
     print_results = True
-    dump_dids(arb_id_request, arb_id_response, timeout, min_did, max_did,
-              print_results)
+    dump_dids(
+        arb_id_request,
+        arb_id_response,
+        timeout,
+        min_did,
+        max_did,
+        print_results,
+        is_fd=args.can_fd,
+        bitrate_switch=args.bitrate_switch
+    )
 
 
 def __auto_wrapper(args):
@@ -873,9 +928,17 @@ def __auto_wrapper(args):
     max_did = args.max_did
 
     try:
-        arb_id_pairs = uds_discovery(min_id, max_id, blacklist,
-                                     auto_blacklist_duration,
-                                     delay, verify, print_results)
+        arb_id_pairs = uds_discovery(
+            min_id,
+            max_id,
+            blacklist,
+            auto_blacklist_duration,
+            delay,
+            verify,
+            print_results,
+            is_fd=args.can_fd,
+            bitrate_switch=args.bitrate_switch
+        )
 
         print("\n")
         if len(arb_id_pairs) == 0:
@@ -1066,7 +1129,8 @@ def __auto_wrapper(args):
 
 
 def dump_dids(arb_id_request, arb_id_response, timeout,
-              min_did=DUMP_DID_MIN, max_did=DUMP_DID_MAX, print_results=True):
+              min_did=DUMP_DID_MIN, max_did=DUMP_DID_MAX, print_results=True,
+              is_fd=False, bitrate_switch=False):
     """
     Sends read data by identifier (DID) messages to 'arb_id_request'.
     Returns a list of positive responses received from 'arb_id_response' within
@@ -1100,7 +1164,9 @@ def dump_dids(arb_id_request, arb_id_response, timeout,
 
     responses = []
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd,
+               bitrate_switch=bitrate_switch) as tp:
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
         with Iso14229_1(tp) as uds:
@@ -1157,8 +1223,19 @@ def __read_mem_wrapper(args):
     print_results = True
     outfile = args.outfile
 
-    results = read_memory(arb_id_request, arb_id_response, timeout, start_addr, mem_length, mem_size, address_byte_size,
-                          memory_length_byte_size, print_results)
+    results = read_memory(
+        arb_id_request,
+        arb_id_response,
+        timeout,
+        start_addr,
+        mem_length,
+        mem_size,
+        address_byte_size,
+        memory_length_byte_size,
+        print_results,
+        is_fd=args.can_fd,
+        bitrate_switch=args.bitrate_switch
+    )
     if outfile:
         with open(outfile, "w") as f:
             for addr, data in results:
@@ -1167,7 +1244,7 @@ def __read_mem_wrapper(args):
 
 def read_memory(arb_id_request, arb_id_response, timeout,
                 start_addr=MEM_START_ADDR, mem_length=MEM_LEN, mem_size=MEM_SIZE, address_byte_size=ADDR_BYTE_SIZE,
-                memory_length_byte_size=MEM_LEN_BYTE_SIZE, print_results=True):
+                memory_length_byte_size=MEM_LEN_BYTE_SIZE, print_results=True, is_fd=False, bitrate_switch=False):
     """
     Sends read memory messages to 'arb_id_request'.
     Returns a list of positive responses received from 'arb_id_response' within
@@ -1209,7 +1286,9 @@ def read_memory(arb_id_request, arb_id_response, timeout,
 
     responses = []
     with IsoTp(arb_id_request=arb_id_request,
-               arb_id_response=arb_id_response) as tp:
+               arb_id_response=arb_id_response,
+               is_fd=is_fd,
+               bitrate_switch=bitrate_switch) as tp:
 
         # Setup filter for incoming messages
         tp.set_filter_single_arbitration_id(arb_id_response)
@@ -1297,6 +1376,10 @@ def __parse_args(args):
                                   type=float, default=DELAY_DISCOVERY,
                                   help="D seconds delay between messages "
                                        "(default: {0})".format(DELAY_DISCOVERY))
+    parser_discovery.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_discovery.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_discovery.set_defaults(func=__uds_discovery_wrapper)
 
     # Parser for diagnostics service discovery
@@ -1312,6 +1395,10 @@ def __parse_args(args):
                              help="wait T seconds for response before "
                                   "timeout (default: {0})"
                              .format(TIMEOUT_SERVICES))
+    parser_info.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_info.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_info.set_defaults(func=__service_discovery_wrapper)
 
     # Parser for diagnostics session control subservice discovery
@@ -1333,6 +1420,10 @@ def __parse_args(args):
                             help="wait T seconds for response before "
                                  "timeout (default: {0})"
                             .format(TIMEOUT_SUBSERVICES))
+    parser_sub.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_sub.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_sub.set_defaults(func=__sub_discovery_wrapper)
 
     # Parser for ECU Reset
@@ -1353,6 +1444,10 @@ def __parse_args(args):
                                   type=float, metavar="T",
                                   help="wait T seconds for response before "
                                        "timeout")
+    parser_ecu_reset.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_ecu_reset.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_ecu_reset.set_defaults(func=__ecu_reset_wrapper)
 
     # Parser for TesterPresent
@@ -1369,6 +1464,10 @@ def __parse_args(args):
                            help="automatically stop after S seconds")
     parser_tp.add_argument("-spr", action="store_true",
                            help="suppress positive response")
+    parser_tp.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_tp.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_tp.set_defaults(func=__tester_present_wrapper)
 
     # Parser for SecuritySeedDump
@@ -1415,6 +1514,10 @@ def __parse_args(args):
                                      " seeds to capture before terminating. "
                                      "A '0' is interpreted as infinity. "
                                      "(default: 0)")
+    parser_secseed.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_secseed.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_secseed.set_defaults(func=__security_seed_wrapper)
 
     # Parser for dump_did
@@ -1438,6 +1541,10 @@ def __parse_args(args):
                             type=parse_int_dec_or_hex,
                             default=DUMP_DID_MAX,
                             help="maximum device identifier (DID) to read (default: 0xFFFF)")
+    parser_did.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_did.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_did.set_defaults(func=__dump_dids_wrapper)
 
     # Parser for read_mem
@@ -1475,6 +1582,10 @@ def __parse_args(args):
                             help=f"numbers of bytes of the memory length parameter (default: {MEM_LEN_BYTE_SIZE})")
     parser_mem.add_argument("--outfile",
                             help="filename to write output to")
+    parser_mem.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_mem.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_mem.set_defaults(func=__read_mem_wrapper)
 
     # Parser for auto
@@ -1518,6 +1629,10 @@ def __parse_args(args):
                              type=parse_int_dec_or_hex,
                              default=DUMP_DID_MAX,
                              help="maximum device identifier (DID) to read (default: 0xFFFF)")
+    parser_auto.add_argument("-fd", "--can-fd", action="store_true", default=False,
+                             help="Send CAN-FD frames")
+    parser_auto.add_argument("-bs", "--bitrate-switch", action="store_true", default=False,
+                             help="Send CAN-FD frames with bitrate switch")
     parser_auto.set_defaults(func=__auto_wrapper)
 
     args = parser.parse_args(args)
