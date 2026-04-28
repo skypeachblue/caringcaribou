@@ -94,6 +94,8 @@ def parse_arguments():
                                      epilog=available_modules())
     parser.add_argument("-i", dest="interface", default=None,
                         help="force interface, e.g. 'can1' or 'vcan0'")
+    parser.add_argument("--delay", dest="message_delay", default=0.1,
+                        help="set message delay in seconds (default=0.1)")
     parser.add_argument("module",
                         help="Name of the module to run")
     parser.add_argument("module_args", metavar="...", nargs=argparse.REMAINDER,
@@ -129,6 +131,8 @@ def main():
     # Save interface to can_actions, for use in modules
     if args.interface:
         can_actions.DEFAULT_INTERFACE = args.interface
+    if args.message_delay:
+        can_actions.MESSAGE_DELAY = args.message_delay
     try:
         # Load module
         cc_mod = load_module(args.module)
